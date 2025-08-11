@@ -1,35 +1,45 @@
 #include <WiFi.h>
 #include <Firebase_ESP_Client.h>
-#include <time.h> //Provide the token generation process info.
+#include <time.h>
 #include "addons/TokenHelper.h"
-// Provide the RTDB payload printing info and other helper functions.
-#include "addons/RTDBHelper.h"      // Pin definitions
+#include "addons/RTDBHelper.h"
+
 const int SOIL_POT_PIN = 34;        // Potentiometer simulating soil moisture on GPIO34
 const int ULTRASONIC_TRIG_PIN = 25; // Ultrasonic trigger on GPIO25
 const int ULTRASONIC_ECHO_PIN = 26; // Ultrasonic echo on GPIO26
 const int RELAY_PIN = 19;           // Relay on GPIO19
 const int LED_PIN = 18;             // LED on GPIO18
 const int SOLAR_POT_PIN = 36;       // Potentiometer simulating solar on GPIO36// Wi-Fi settings for Wokwi
+
 const char *ssid = "Wokwi-GUEST";
-const char *password = ""; // Firebase configuration
+const char *password = "";
+
+// Firebase configuration
 #define API_KEY "AIzaSyCmvVA9K1kkzhMq8bMuJXVnNHI_c92_DW8"
-#define DATABASE_URL "water-harvesting-b4520-default-rtdb.firebaseio.com" // Firebase objects
+#define DATABASE_URL "water-harvesting-b4520-default-rtdb.firebaseio.com"
+
+// Firebase objects
 FirebaseData fbdo;
 FirebaseAuth auth;
 FirebaseConfig config;
 bool signupOK = false;
 unsigned long dataMillis = 0;
 int count = 0;
-void setup()
+
+void initializeSerialAndPins()
 {
   Serial.begin(115200);
-  delay(1000); // Set up pins
+  delay(1000);
   pinMode(ULTRASONIC_TRIG_PIN, OUTPUT);
   pinMode(ULTRASONIC_ECHO_PIN, INPUT);
   pinMode(RELAY_PIN, OUTPUT);
   pinMode(LED_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, LOW); // Start with pump off
-  digitalWrite(LED_PIN, LOW);   // Start with LED off  // Connect to Wi-Fi
+  digitalWrite(RELAY_PIN, LOW);
+  digitalWrite(LED_PIN, LOW);
+}
+
+void connectToWiFi()
+{
   WiFi.begin(ssid, password);
   Serial.print("Connecting to Wi-Fi");
   unsigned long wifiTimeout = millis();
@@ -48,7 +58,10 @@ void setup()
   Serial.println();
   Serial.print("Connected with IP: ");
   Serial.println(WiFi.localIP());
+}
 
+void syncTime()
+{
   // Configure time with better error handling
   configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
 
@@ -86,7 +99,10 @@ void setup()
     gmtime_r(&nowSecs, &timeinfo);
     Serial.printf("Current time: %s", asctime(&timeinfo));
   }
+}
 
+void initializeFirebase()
+{
   // Firebase configuration
   config.api_key = API_KEY;
   config.database_url = DATABASE_URL;
@@ -148,18 +164,23 @@ void setup()
     Serial.println(fbdo.errorReason());
   }
 }
-void loop()
+
+int readSoilMoisture()
 {
-  // Read potentiometer (simulating soil moisture, 0% dry, 100% wet)
   int soilRaw = analogRead(SOIL_POT_PIN);
-  int soilMoisture = map(soilRaw, 0, 4095, 0, 100); // Map to 0-100%  // Read water level with ultrasonic sensor
+  return map(soilRaw, 0, 4095, 0, 100); // Map to 0-100%
+}
+
+int readWaterLevel()
+{
   digitalWrite(ULTRASONIC_TRIG_PIN, LOW);
   delayMicroseconds(2);
   digitalWrite(ULTRASONIC_TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(ULTRASONIC_TRIG_PIN, LOW);
   long duration = pulseIn(ULTRASONIC_ECHO_PIN, HIGH);
-  long distance = duration * 0.034 / 2; // Distance in cm  Serial.print("Distance: ");
+  long distance = duration * 0.034 / 2; // Distance in cm
+  Serial.print("Distance: ");
   Serial.println(distance);
   int waterLevel = 0;
   if (distance <= 100)
@@ -169,21 +190,42 @@ void loop()
       waterLevel = 0;
     if (waterLevel > 100)
       waterLevel = 100;
-  } // Read solar voltage (simulated with potentiometer)
+  }
+  return waterLevel;
+}
+
+float readSolarVoltage()
+{
   int solarRaw = analogRead(SOLAR_POT_PIN);
-  float solarVoltage = solarRaw / 4095.0 * 3.3; // 0 to 3.3V  // Decide if pump should run
-  bool pumpShouldRun = false;
+  return solarRaw / 4095.0 * 3.3; // 0 to 3.3V
+}
+
+bool shouldRunPump(int soilMoisture, int waterLevel, float solarVoltage)
+{
   if (solarVoltage > 2.5)
   { // Enough power
     if (soilMoisture < 30 && waterLevel > 10)
     { // Soil "dry", water available
-      pumpShouldRun = true;
+      return true;
     }
   }
+  return false;
+}
+
+void controlActuators(bool pumpShouldRun)
+{
   digitalWrite(RELAY_PIN, pumpShouldRun ? HIGH : LOW);
-  digitalWrite(LED_PIN, pumpShouldRun ? HIGH : LOW); // Print sensor readings
+  digitalWrite(LED_PIN, pumpShouldRun ? HIGH : LOW);
+}
+
+void printSensorReadings(int soilMoisture, int waterLevel, float solarVoltage, bool pumpShouldRun)
+{
   Serial.printf("Soil Moisture: %d%%, Water Level: %d%%, Solar Voltage: %.2fV, Pump: %s\n",
-                soilMoisture, waterLevel, solarVoltage, pumpShouldRun ? "ON" : "OFF"); // Send data to Firebase (with error handling and retry logic)
+                soilMoisture, waterLevel, solarVoltage, pumpShouldRun ? "ON" : "OFF");
+}
+
+void sendDataToFirebase(int soilMoisture, int waterLevel, float solarVoltage, bool pumpShouldRun)
+{
   if (Firebase.ready() && signupOK && (millis() - dataMillis > 30000 || dataMillis == 0))
   {
     dataMillis = millis();
@@ -226,6 +268,25 @@ void loop()
       Serial.println("WiFi disconnected, reconnecting...");
       WiFi.reconnect();
     }
-  } // Wait before next reading
+  }
+}
+
+void setup()
+{
+  initializeSerialAndPins();
+  connectToWiFi();
+  syncTime();
+  initializeFirebase();
+}
+
+void loop()
+{
+  int soilMoisture = readSoilMoisture();
+  int waterLevel = readWaterLevel();
+  float solarVoltage = readSolarVoltage();
+  bool pumpShouldRun = shouldRunPump(soilMoisture, waterLevel, solarVoltage);
+  controlActuators(pumpShouldRun);
+  printSensorReadings(soilMoisture, waterLevel, solarVoltage, pumpShouldRun);
+  sendDataToFirebase(soilMoisture, waterLevel, solarVoltage, pumpShouldRun);
   delay(5000); // Reduced delay for testing, increase for production
 }
