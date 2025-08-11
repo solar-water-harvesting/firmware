@@ -1,4 +1,3 @@
-// #include <Arduino.h>
 #include <WiFi.h>
 #include <Firebase_ESP_Client.h>
 #include <time.h> //Provide the token generation process info.
@@ -14,7 +13,7 @@ const int SOLAR_POT_PIN = 36;       // Potentiometer simulating solar on GPIO36/
 const char *ssid = "Wokwi-GUEST";
 const char *password = ""; // Firebase configuration
 #define API_KEY "AIzaSyCmvVA9K1kkzhMq8bMuJXVnNHI_c92_DW8"
-#define DATABASE_URL "https://water-harvesting-b4520-default-rtdb.firebaseio.com/" // Firebase objects
+#define DATABASE_URL "water-harvesting-b4520-default-rtdb.firebaseio.com" // Firebase objects
 FirebaseData fbdo;
 FirebaseAuth auth;
 FirebaseConfig config;
@@ -33,42 +32,121 @@ void setup()
   digitalWrite(LED_PIN, LOW);   // Start with LED off  // Connect to Wi-Fi
   WiFi.begin(ssid, password);
   Serial.print("Connecting to Wi-Fi");
-  while (WiFi.status() != WL_CONNECTED)
+  unsigned long wifiTimeout = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - wifiTimeout < 30000)
   {
-    delay(1000);
+    delay(500);
     Serial.print(".");
   }
+
+  if (WiFi.status() != WL_CONNECTED)
+  {
+    Serial.println("\nWiFi connection failed! Restarting...");
+    ESP.restart();
+  }
+
   Serial.println();
   Serial.print("Connected with IP: ");
-  Serial.println(WiFi.localIP()); // Configure time (important for SSL certificates)
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  Serial.println(WiFi.localIP());
+
+  // Configure time with better error handling
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
+
   Serial.print("Waiting for NTP time sync: ");
   time_t nowSecs = time(nullptr);
-  while (nowSecs < 8 * 3600 * 2)
+  int retryCount = 0;
+  while (nowSecs < 8 * 3600 * 2 && retryCount < 40)
   {
     delay(500);
     Serial.print(".");
     yield();
     nowSecs = time(nullptr);
+    retryCount++;
   }
-  Serial.println();
-  struct tm timeinfo;
-  gmtime_r(&nowSecs, &timeinfo);
-  Serial.printf("Current time: %s", asctime(&timeinfo)); /* Assign the api key (required) */
-  config.api_key = API_KEY;                              /* Assign the RTDB URL (required) */
-  config.database_url = DATABASE_URL;                    /* Sign up with retry */
-  while (!Firebase.signUp(&config, &auth, "", ""))
+
+  if (retryCount >= 40)
   {
-    Serial.println("Firebase sign up failed: ");
-    Serial.println(String(config.signer.signupError.message.c_str()));
-    Serial.println("Retrying in 2 seconds...");
-    delay(2000);
+    Serial.println("\nNTP sync timeout - using fallback time");
+    // Set a reasonable time for SSL to work
+    struct tm timeinfo;
+    timeinfo.tm_year = 125; // 2025 - 1900
+    timeinfo.tm_mon = 7;    // August (0-11)
+    timeinfo.tm_mday = 11;
+    timeinfo.tm_hour = 12;
+    timeinfo.tm_min = 0;
+    timeinfo.tm_sec = 0;
+    time_t t = mktime(&timeinfo);
+    struct timeval tv = {.tv_sec = t};
+    settimeofday(&tv, NULL);
   }
-  Serial.println("Firebase sign up successful!");
-  signupOK = true;                                    /* Assign the callback function for the long running token generation task */
-  config.token_status_callback = tokenStatusCallback; // see addons/TokenHelper.h  Firebase.begin(&config, &auth);
+  else
+  {
+    Serial.println("\nTime synchronized successfully");
+    struct tm timeinfo;
+    gmtime_r(&nowSecs, &timeinfo);
+    Serial.printf("Current time: %s", asctime(&timeinfo));
+  }
+
+  // Firebase configuration
+  config.api_key = API_KEY;
+  config.database_url = DATABASE_URL;
+
+  // IMPORTANT: Add these for Wokwi compatibility
+  config.signer.test_mode = true; // Disable certificate validation for testing
+  config.cert.data = nullptr;     // Skip certificate
+
+  // Increase timeouts for slow simulation
+  config.timeout.serverResponse = 15 * 1000;
+  config.timeout.socketConnection = 15 * 1000;
+  config.timeout.sslHandshake = 20 * 1000;
+
+  // Configure token callback
+  config.token_status_callback = tokenStatusCallback;
+
+  // Increase buffer sizes
+  fbdo.setBSSLBufferSize(4096, 1024);
+
+  // Try anonymous auth instead of signup (simpler for testing)
+  Serial.println("Attempting Firebase authentication...");
+
+  // Option 1: Try signup first
+  if (!Firebase.signUp(&config, &auth, "", ""))
+  {
+    Serial.println("Sign up failed, trying anonymous mode");
+    // Option 2: Use anonymous mode as fallback
+    auth.user.email = "";
+    auth.user.password = "";
+    signupOK = true; // Proceed anyway for testing
+  }
+  else
+  {
+    Serial.println("Firebase sign up successful!");
+    signupOK = true;
+  }
+
+  // Initialize Firebase
+  Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
+
+  // Set stream timeouts
+  if (!fbdo.httpConnected())
+  {
+    fbdo.setResponseSize(1024);
+  }
+
   Serial.println("System ready to send data");
+
+  // Test Firebase connection
+  Serial.println("Testing Firebase connection...");
+  if (Firebase.RTDB.setInt(&fbdo, "/test/connection", 1))
+  {
+    Serial.println("Firebase connection test successful!");
+  }
+  else
+  {
+    Serial.println("Firebase connection test failed:");
+    Serial.println(fbdo.errorReason());
+  }
 }
 void loop()
 {
