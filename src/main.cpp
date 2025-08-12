@@ -1,6 +1,7 @@
 #include <WiFi.h>
 #include <Firebase_ESP_Client.h>
 #include <time.h>
+#include <DHTesp.h>
 #include "addons/TokenHelper.h"
 #include "addons/RTDBHelper.h"
 
@@ -9,8 +10,10 @@ const int ULTRASONIC_TRIG_PIN = 25; // Ultrasonic trigger on GPIO25
 const int ULTRASONIC_ECHO_PIN = 26; // Ultrasonic echo on GPIO26
 const int RELAY_PIN = 19;           // Relay on GPIO19
 const int LED_PIN = 18;             // LED on GPIO18
-const int SOLAR_POT_PIN = 36;       // Potentiometer simulating solar on GPIO36// Wi-Fi settings for Wokwi
+const int SOLAR_POT_PIN = 36;       // Potentiometer simulating solar on GPIO36
+const int DHT_PIN = 27;             // DHT22 data pin on GPIO27
 
+// Wi-Fi settings for Wokwi
 const char *ssid = "Wokwi-GUEST";
 const char *password = "";
 
@@ -26,6 +29,9 @@ bool signupOK = false;
 unsigned long dataMillis = 0;
 int count = 0;
 
+// DHT sensor object
+DHTesp dht;
+
 void initializeSerialAndPins()
 {
   Serial.begin(115200);
@@ -36,6 +42,9 @@ void initializeSerialAndPins()
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, LOW);
   digitalWrite(LED_PIN, LOW);
+
+  // Initialize DHT sensor
+  dht.setup(DHT_PIN, DHTesp::DHT22);
 }
 
 void connectToWiFi()
@@ -200,11 +209,34 @@ float readSolarVoltage()
   return solarRaw / 4095.0 * 3.3; // 0 to 3.3V
 }
 
-bool shouldRunPump(int soilMoisture, int waterLevel, float solarVoltage)
+void readTempAndHumidity(float &temperature, float &humidity)
 {
+  TempAndHumidity newValues = dht.getTempAndHumidity();
+  if (dht.getStatus() == 0)
+  {
+    temperature = newValues.temperature; // In Celsius
+    humidity = newValues.humidity;       // In %
+  }
+  else
+  {
+    Serial.println("Failed to read from DHT sensor!");
+    temperature = NAN; // Not a Number, indicates a failed reading
+    humidity = NAN;
+  }
+}
+
+bool shouldRunPump(int soilMoisture, int waterLevel, float solarVoltage, float temperature, float humidity)
+{
+  // Adjust moisture threshold based on temp/humidity
+  int moistureThreshold = 30; // Default
+  if (temperature > 30 || humidity < 40)
+  {
+    moistureThreshold = 25; // Water sooner in hot/dry conditions
+  }
+
   if (solarVoltage > 2.5)
   { // Enough power
-    if (soilMoisture < 30 && waterLevel > 10)
+    if (soilMoisture < moistureThreshold && waterLevel > 10)
     { // Soil "dry", water available
       return true;
     }
@@ -218,13 +250,13 @@ void controlActuators(bool pumpShouldRun)
   digitalWrite(LED_PIN, pumpShouldRun ? HIGH : LOW);
 }
 
-void printSensorReadings(int soilMoisture, int waterLevel, float solarVoltage, bool pumpShouldRun)
+void printSensorReadings(int soilMoisture, int waterLevel, float solarVoltage, float temperature, float humidity, bool pumpShouldRun)
 {
-  Serial.printf("Soil Moisture: %d%%, Water Level: %d%%, Solar Voltage: %.2fV, Pump: %s\n",
-                soilMoisture, waterLevel, solarVoltage, pumpShouldRun ? "ON" : "OFF");
+  Serial.printf("Soil: %d%%, Water: %d%%, Solar: %.2fV, Temp: %.1fC, Humid: %.1f%%, Pump: %s\n",
+                soilMoisture, waterLevel, solarVoltage, temperature, humidity, pumpShouldRun ? "ON" : "OFF");
 }
 
-void sendDataToFirebase(int soilMoisture, int waterLevel, float solarVoltage, bool pumpShouldRun)
+void sendDataToFirebase(int soilMoisture, int waterLevel, float solarVoltage, float temperature, float humidity, bool pumpShouldRun)
 {
   if (Firebase.ready() && signupOK && (millis() - dataMillis > 30000 || dataMillis == 0))
   {
@@ -237,6 +269,8 @@ void sendDataToFirebase(int soilMoisture, int waterLevel, float solarVoltage, bo
     json.set("waterLevel", waterLevel);
     json.set("solarVoltage", solarVoltage);
     json.set("pumpStatus", pumpShouldRun ? 1 : 0);
+    json.set("temperature", temperature);
+    json.set("humidity", humidity);
     json.set("timestamp", (int)(millis() / 1000));
     json.set("count", count++);
 
@@ -284,9 +318,12 @@ void loop()
   int soilMoisture = readSoilMoisture();
   int waterLevel = readWaterLevel();
   float solarVoltage = readSolarVoltage();
-  bool pumpShouldRun = shouldRunPump(soilMoisture, waterLevel, solarVoltage);
+  float temperature, humidity;
+  readTempAndHumidity(temperature, humidity);
+
+  bool pumpShouldRun = shouldRunPump(soilMoisture, waterLevel, solarVoltage, temperature, humidity);
   controlActuators(pumpShouldRun);
-  printSensorReadings(soilMoisture, waterLevel, solarVoltage, pumpShouldRun);
-  sendDataToFirebase(soilMoisture, waterLevel, solarVoltage, pumpShouldRun);
+  printSensorReadings(soilMoisture, waterLevel, solarVoltage, temperature, humidity, pumpShouldRun);
+  sendDataToFirebase(soilMoisture, waterLevel, solarVoltage, temperature, humidity, pumpShouldRun);
   delay(5000); // Reduced delay for testing, increase for production
 }

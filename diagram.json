@@ -36,7 +36,7 @@
       "id": "ultrasonic1",
       "top": 241.5,
       "left": -503.3,
-      "attrs": {}
+      "attrs": { "distance": "46" }
     },
     {
       "type": "wokwi-potentiometer",
@@ -86,6 +86,13 @@
       "top": 163.2,
       "left": -393.6,
       "attrs": { "text": "gnd" }
+    },
+    {
+      "type": "wokwi-dht22",
+      "id": "dht1",
+      "top": 86.7,
+      "left": -504.6,
+      "attrs": {}
     }
   ],
   "connections": [
@@ -93,13 +100,13 @@
     ["esp:RX", "$serialMonitor:TX", "", []],
     ["esp:GND.1", "bb1:bn.25", "black", ["h0"]],
     ["esp:5V", "bb1:bp.24", "red", ["h0"]],
-    ["esp:34", "pot1:SIG", "green", ["h-19.05", "v192", "h-192"]],
+    ["esp:34", "pot1:SIG", "cyan", ["h-19.05", "v192", "h-192"]],
     ["pot1:VCC", "bb1:bp.23", "red", ["v19.2", "h104.8"]],
     ["pot1:GND", "bb1:bn.22", "black", ["v48", "h124.8"]],
     ["ultrasonic1:VCC", "bb1:bp.6", "red", ["v28.8", "h153.6"]],
     ["ultrasonic1:GND", "bb1:bn.7", "black", ["v19.2", "h142.8"]],
-    ["ultrasonic1:ECHO", "esp:26", "green", ["v57.6", "h383.2", "v-230.4"]],
-    ["ultrasonic1:TRIG", "esp:25", "green", ["v67.2", "h402.8", "v-28.8"]],
+    ["ultrasonic1:ECHO", "esp:26", "yellow", ["v57.6", "h383.2", "v-230.4"]],
+    ["ultrasonic1:TRIG", "esp:25", "yellow", ["v67.2", "h402.8", "v-28.8"]],
     ["pot2:VCC", "bb1:bp.25", "red", ["v134.4", "h-288.8"]],
     ["pot2:GND", "bb1:bn.20", "black", ["v153.6", "h-307.2"]],
     ["relay1:VCC", "bb1:bp.18", "red", ["h-38.4", "v364.8", "h-288"]],
@@ -108,11 +115,19 @@
     ["led1:A", "r1:1", "green", ["v0"]],
     ["led1:C", "bb1:bn.4", "green", ["v0"]],
     ["r1:2", "esp:18", "green", ["v-96", "h373.2", "v134.4"]],
+    ["pot2:SIG", "esp:VP", "blue", ["v48", "h-230.8", "v-268.8"]],
     ["led1:A", "bb1:6t.b", "", ["$bb"]],
     ["led1:C", "bb1:5t.b", "", ["$bb"]],
     ["r1:1", "bb1:6t.d", "", ["$bb"]],
     ["r1:2", "bb1:12t.d", "", ["$bb"]],
-    ["pot2:SIG", "esp:VP", "green", ["v48", "h-230.8", "v-268.8"]]
+    ["dht1:VCC", "bb1:bp.1", "red", ["v9.6", "h124.8", "v-48"]],
+    ["dht1:GND", "bb1:bn.1", "black", ["v19.2", "h105.6"]],
+    [
+      "dht1:SDA",
+      "esp:27",
+      "magenta",
+      ["v28.8", "h-57.5", "v-297.6", "h518.4", "v220.8"]
+    ]
   ],
   "dependencies": {}
 }
