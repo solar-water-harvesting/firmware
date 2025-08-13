@@ -69,47 +69,6 @@ void connectToWiFi()
   Serial.println(WiFi.localIP());
 }
 
-void syncTime()
-{
-  // Configure time with better error handling
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
-
-  Serial.print("Waiting for NTP time sync: ");
-  time_t nowSecs = time(nullptr);
-  int retryCount = 0;
-  while (nowSecs < 8 * 3600 * 2 && retryCount < 40)
-  {
-    delay(500);
-    Serial.print(".");
-    yield();
-    nowSecs = time(nullptr);
-    retryCount++;
-  }
-
-  if (retryCount >= 40)
-  {
-    Serial.println("\nNTP sync timeout - using fallback time");
-    // Set a reasonable time for SSL to work
-    struct tm timeinfo;
-    timeinfo.tm_year = 125; // 2025 - 1900
-    timeinfo.tm_mon = 7;    // August (0-11)
-    timeinfo.tm_mday = 11;
-    timeinfo.tm_hour = 12;
-    timeinfo.tm_min = 0;
-    timeinfo.tm_sec = 0;
-    time_t t = mktime(&timeinfo);
-    struct timeval tv = {.tv_sec = t};
-    settimeofday(&tv, NULL);
-  }
-  else
-  {
-    Serial.println("\nTime synchronized successfully");
-    struct tm timeinfo;
-    gmtime_r(&nowSecs, &timeinfo);
-    Serial.printf("Current time: %s", asctime(&timeinfo));
-  }
-}
-
 void initializeFirebase()
 {
   // Firebase configuration
@@ -127,9 +86,6 @@ void initializeFirebase()
 
   // Configure token callback
   config.token_status_callback = tokenStatusCallback;
-
-  // Increase buffer sizes
-  fbdo.setBSSLBufferSize(4096, 1024);
 
   // Try anonymous auth instead of signup (simpler for testing)
   Serial.println("Attempting Firebase authentication...");
@@ -309,7 +265,6 @@ void setup()
 {
   initializeSerialAndPins();
   connectToWiFi();
-  syncTime();
   initializeFirebase();
 }
 
